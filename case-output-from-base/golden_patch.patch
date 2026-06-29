@@ -1,0 +1,12 @@
+diff --git a/products/default/src/main/ets/pages/backgroundImmersive/componentBackgroundImmersive/Shopping.ets b/products/default/src/main/ets/pages/backgroundImmersive/componentBackgroundImmersive/Shopping.ets
+index 5215fe2..bd971b9 100644
+--- a/products/default/src/main/ets/pages/backgroundImmersive/componentBackgroundImmersive/Shopping.ets
++++ b/products/default/src/main/ets/pages/backgroundImmersive/componentBackgroundImmersive/Shopping.ets
+@@ -23,6 +23,7 @@ export struct Shopping {
+         Home()
+       }
+       .backgroundColor($r('app.color.page_background'))
++      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP])
+       .id('ShoppingColumn')
+     }
+     .hideTitleBar(true)

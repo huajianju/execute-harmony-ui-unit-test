@@ -1,0 +1,26 @@
+{
+  "case_id": "cover-immersiver-from-base-status-bar",
+  "mode": "from_base",
+  "source_base_commit": "4ccd6974fcb9a547ff7a5e7b512801331a941115",
+  "source_answer_commit": null,
+  "removal_commits": [],
+  "golden_commits": [
+    "3d73623163a2bc3924777ba571978935ca53e5fa"
+  ],
+  "test_commits": [
+    "ec21b2b873db5f094c93d66c8349f2eb517b9e41",
+    "6f56e4e0f6da39c42173078a646fb9dc9969222d"
+  ],
+  "generated_base_commit": "4ccd6974fcb9a547ff7a5e7b512801331a941115",
+  "generated_answer_commit": "e61d3e3cb8c204d0daed1ec62e5e42868c9561ea",
+  "generated_test_commit": "ba00c1a408b1d91f28bf973cf7398e0e48f4b99c",
+  "golden_patch": "golden_patch.patch",
+  "test_patch": "test_patch.patch",
+  "base_project": "base",
+  "fail_to_pass": [
+    "should_content_area_not_overlap_nav_bar"
+  ],
+  "pass_to_pass": [
+    "should_content_main_home_is_exist"
+  ]
+}
