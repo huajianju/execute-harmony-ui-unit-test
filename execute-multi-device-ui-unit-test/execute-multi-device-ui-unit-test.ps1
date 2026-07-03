@@ -287,6 +287,15 @@ function Stop-EmulatorInstance {
   try { & $EmuExe -stop $Name 2>&1 | Out-Null } catch {}
 }
 
+# auto-add DevEco tool dirs to PATH (hdc/hvigorw/ohpm) derived from DEVECO_SDK_HOME
+if($env:DEVECO_SDK_HOME){
+  $tc = Join-Path $env:DEVECO_SDK_HOME 'default\openharmony\toolchains'
+  $devRoot = Split-Path $env:DEVECO_SDK_HOME -Parent
+  foreach($d in @($tc, (Join-Path $devRoot 'tools\hvigor\bin'), (Join-Path $devRoot 'tools\ohpm\bin'))){
+    if((Test-Path -LiteralPath $d) -and ($env:PATH -notlike "*$d*")){ $env:PATH = "$env:PATH;$d" }
+  }
+}
+
 # ---------------- 0. env check ----------------
 Write-Step "Environment check"
 foreach($t in 'hvigorw','hdc','ohpm','node'){ if(-not(Get-Command $t -ErrorAction SilentlyContinue)){Die "Command not found: $t"} }

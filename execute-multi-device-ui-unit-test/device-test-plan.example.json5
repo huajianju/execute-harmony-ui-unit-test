@@ -28,18 +28,19 @@
       // 【推荐 · 模拟器】填 emulator 实例名 + hdcport：
       //   - 命令行启动的模拟器不会被 hdc 自动发现，脚本用 -hdcport 启动 + hdc tconn 主动连接；
       //   - 一次只跑一个模拟器，跑完即 Emulator -stop 关闭，再启动下一个。
-      "name": "手机模拟器",
+      // name: 不要使用中文
+      "name": "PhoneEmulator",
       "emulator": "Pura 90 Pro",            // Emulator -list 列出的实例名
-      "hdcport": 5554,                       // 强烈建议：固定 hdc 端口（10000-16555）
+      "hdcport": 15554,                       // 强烈建议：固定 hdc 端口（10000-16555）
       "tests": [
         "ActsAbilityTest",
         "attributeTest#testAttributeIt"
       ]
     },
     {
-      "name": "平板模拟器",
+      "name": "tabletEmulator",
       "emulator": "MatePad Pro 12",
-      "hdcport": 5556,
+      "hdcport": 15556,
       "tests": [
         "ActsGraphicsTest",
         "ActsCameraTest"
@@ -47,7 +48,7 @@
     },
     {
       // 【真机】填 device（hdc 序列号），直接复用已在线的真机/模拟器，不启动任何模拟器。
-      "name": "USB真机",
+      "name": "USBPhone",
       "device": "127.0.0.1:5555",
       "tests": [
         "ActsAbilityTest#testExample"
