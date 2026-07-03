@@ -1,0 +1,57 @@
+{
+  // ============================================================
+  // 多设备测试计划示例（device-test-plan.json5）
+  // ------------------------------------------------------------
+  // 用途：把不同的测试用例分配到不同模拟器/设备上执行（一次只跑一个，跑完即关）。
+  //   - 复制本文件为 device-test-plan.json5 并按需修改；
+  //   - 脚本运行时若未用 -TestPlan 指定，会自动检测工程根目录的
+  //     device-test-plan.json5，存在即进入「多设备计划模式」；
+  //   - 也可用 -TestPlan <路径>（Windows）/ --test-plan <路径>（macOS/Linux）显式指定。
+  //
+  // 用例过滤语法（对应 aa test 的 -s class 参数）：
+  //   - "测试套名"          整个测试套（即 describe('xxx') 的名称）
+  //   - "测试套名#用例名"   仅该测试套中的指定用例（即 it('yyy') 的名称）
+  //   多个用逗号隔开即可，一个设备只需运行一次 aa test。
+  // ============================================================
+
+  // 可选：模拟器可执行文件路径。
+  // 不填则自动从 DEVECO_SDK_HOME 发现（Windows: ..\tools\emulator\Emulator.exe）。
+  // "emulatorPath": "D:\\Program Files\\Huawei\\DevEco Studio\\tools\\emulator\\Emulator.exe",
+
+  // 可选：等待模拟器系统启动完成的轮询超时（秒），默认 20。
+  // 脚本轮询 bootevent.boot.finished，命中 true 即止（通常几秒）；超时则额外等 15s 后再唤醒/解锁。
+  // "bootTimeout": 20,
+
+  // 设备计划列表（至少 1 个，可任意多个）
+  "devices": [
+    {
+      // 【推荐 · 模拟器】填 emulator 实例名 + hdcport：
+      //   - 命令行启动的模拟器不会被 hdc 自动发现，脚本用 -hdcport 启动 + hdc tconn 主动连接；
+      //   - 一次只跑一个模拟器，跑完即 Emulator -stop 关闭，再启动下一个。
+      "name": "手机模拟器",
+      "emulator": "Pura 90 Pro",            // Emulator -list 列出的实例名
+      "hdcport": 5554,                       // 强烈建议：固定 hdc 端口（10000-16555）
+      "tests": [
+        "ActsAbilityTest",
+        "attributeTest#testAttributeIt"
+      ]
+    },
+    {
+      "name": "平板模拟器",
+      "emulator": "MatePad Pro 12",
+      "hdcport": 5556,
+      "tests": [
+        "ActsGraphicsTest",
+        "ActsCameraTest"
+      ]
+    },
+    {
+      // 【真机】填 device（hdc 序列号），直接复用已在线的真机/模拟器，不启动任何模拟器。
+      "name": "USB真机",
+      "device": "127.0.0.1:5555",
+      "tests": [
+        "ActsAbilityTest#testExample"
+      ]
+    }
+  ]
+}
