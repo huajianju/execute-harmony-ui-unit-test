@@ -95,22 +95,39 @@ function Wait-BootFinished {
 function Unlock-Screen {
   param([Parameter(Mandatory)][string]$Serial)
   Write-Host "  主动唤醒并解锁屏幕..." -ForegroundColor DarkGray
-  try { & hdc -t $Serial shell power-shell wakeup 2>$null | Out-Null } catch {}
-  try { & hdc -t $Serial shell power-shell timeout -o 600000 2>$null | Out-Null } catch {}
-  Start-Sleep -Seconds 2
-  try { & hdc -t $Serial shell uinput -T -m 540 2000 540 400 500 2>$null | Out-Null } catch {}
-  Start-Sleep -Seconds 2
+  $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+  $r1 = (& hdc -t $Serial shell power-shell wakeup 2>&1 | Out-String).Trim()
+  $null = & hdc -t $Serial shell power-shell timeout -o 600000 2>&1
+  Start-Sleep -Seconds 3
+  # 上滑解锁，重试 2 次（不同分辨率坐标可能不同）
+  $r3 = ''
+  foreach($i in 1..2){
+    $r3 = (& hdc -t $Serial shell uinput -T -m 540 2000 540 400 500 2>&1 | Out-String).Trim()
+    Start-Sleep -Seconds 2
+  }
+  $ErrorActionPreference = $prevEAP
+  Write-Host ("    power-shell wakeup : {0}" -f $(if($r1){$r1}else{'(无输出/ok)'})) -ForegroundColor DarkGray
+  Write-Host ("    uinput swipe x2   : {0}" -f $(if($r3){$r3}else{'(无输出/ok)'})) -ForegroundColor DarkGray
 }
 
 # Ensure the device is fully booted, then wake & unlock. Called before install on every device.
 function Wait-DeviceReady {
   param([Parameter(Mandatory)][string]$Serial,[int]$BootTimeout=20)
   Write-Host "  确认系统完全启动（bootTimeout=${BootTimeout}s）..." -ForegroundColor DarkGray
-  if(Wait-BootFinished -Serial $Serial -WaitSec $BootTimeout){ Write-Host "    系统已完全启动" -ForegroundColor Green }
+  if(Wait-BootFinished -Serial $Serial -WaitSec $BootTimeout){ Write-Host "    bootevent=true" -ForegroundColor Green }
   else {
-    Write-Host "    未检测到启动完成标志，额外等待 15s 后唤醒..." -ForegroundColor Yellow
+    Write-Host "    未检测到 bootevent，额外等待 15s..." -ForegroundColor Yellow
     Start-Sleep -Seconds 15
   }
+  # 兜底：用 bm dump 能响应来确认系统服务就绪（bootevent 拿不到时尤为重要）
+  $bmDeadline = (Get-Date).AddSeconds(90)
+  $bmReady = $false
+  while((Get-Date) -lt $bmDeadline){
+    try { $r = & hdc -t $Serial shell bm dump -a 2>$null; if($LASTEXITCODE -eq 0 -and "$r".Trim().Length -gt 0){ $bmReady = $true; break } } catch {}
+    Start-Sleep -Seconds 5
+  }
+  if($bmReady){ Write-Host "    系统服务就绪（bm dump 可用）" -ForegroundColor Green }
+  else { Write-Host "    系统服务仍未就绪，继续尝试唤醒..." -ForegroundColor Yellow }
   Unlock-Screen -Serial $Serial
 }
 
@@ -217,7 +234,11 @@ function Resolve-EmulatorSerial {
   param([Parameter(Mandatory)][string]$EmuExe,[Parameter(Mandatory)][string]$Name,[int]$HdcPort=0,[int]$WaitSec=180)
   $info = Get-EmulatorInstanceInfo -EmuExe $EmuExe -Name $Name
   $wasRunning = ($info -and $info.Running)
-  $before = @(Get-HdcTargets)   # capture BEFORE launching the emulator
+  # capture BEFORE launching: retry to ensure already-connected devices (e.g. real phone) are included,
+  # so the diff fallback won't mistakenly pick them up as the "new" emulator.
+  $before = @()
+  $bd = (Get-Date).AddSeconds(10)
+  while((Get-Date) -lt $bd){ $before = @(Get-HdcTargets); if($before.Count -gt 0){ break }; Start-Sleep -Seconds 2 }
   if(-not $wasRunning){
     Write-Host ("  模拟器 '{0}' 未运行，执行启动：{1} -start {0}" -f $Name,$EmuExe) -ForegroundColor Cyan
     try { & $EmuExe -license accept 2>&1 | Out-Null } catch {}
@@ -257,8 +278,10 @@ function Resolve-EmulatorSerial {
         elseif(Test-HdcSerial $tconn2){ $cand = $tconn2 }
       }
     }
-    # 3) fallback: newly-online diff (freshly started), verified
-    if(-not $cand -and -not $wasRunning){
+    # 3) fallback: newly-online diff — ONLY when no hdcport configured.
+    #    With hdcport set, diff is disabled because it may wrongly pick an already-connected real device
+    #    (only 127.0.0.1:<hdcport> is accepted as the emulator in that case).
+    if(-not $cand -and -not $wasRunning -and $HdcPort -eq 0){
       $new = @($targets | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and ($before -notcontains $_) })
       foreach($cc in $new){ if(Test-HdcSerial $cc){ $cand = $cc; break } }
     }
@@ -287,6 +310,8 @@ function Stop-EmulatorInstance {
   try { & $EmuExe -stop $Name 2>&1 | Out-Null } catch {}
 }
 
+# put CWD (project root, contains hvigorw/hvigorw.bat) first in PATH so `hvigorw` resolves
+$env:PATH = "$PWD;$env:PATH"
 # auto-add DevEco tool dirs to PATH (hdc/hvigorw/ohpm) derived from DEVECO_SDK_HOME
 if($env:DEVECO_SDK_HOME){
   $tc = Join-Path $env:DEVECO_SDK_HOME 'default\openharmony\toolchains'
@@ -381,18 +406,28 @@ if($planFile){
     $emuName = if($pd.emulator){ $pd.emulator.Trim() } else { '' }
     $hp = if($pd.hdcport){ [int]$pd.hdcport } else { 0 }
     $devSerial = if($pd.device){ $pd.device.Trim() } else { '' }
-    if($devSerial){
-      $cur = @(Get-HdcTargets)
-      if($cur -contains $devSerial){
-        $devices += [pscustomobject]@{ Label=$label; ClassFilter=$cf; Emulator=''; HdcPort=0; DeviceSerial=$devSerial; IsEmulator=$false }
-        Write-Host ("  设备 {0}：已在线（{1}），直接复用" -f $label,$devSerial) -ForegroundColor Green
-      } else { Die "设备 $label 的 device '$devSerial' 不在线（真机/已启动设备需已连接；模拟器请改用 emulator + hdcport 配置）。" }
-    } elseif($emuName){
+    if($emuName){
       if(-not $emuExe){ Die "设备 $label 配置了 emulator 但缺少 Emulator.exe（请设置 emulatorPath 或 DEVECO_SDK_HOME）。" }
       $devices += [pscustomobject]@{ Label=$label; ClassFilter=$cf; Emulator=$emuName; HdcPort=$hp; DeviceSerial=''; IsEmulator=$true }
       Write-Host ("  设备 {0}：模拟器 '{1}'（hdcport={2}，将在执行时启动、跑完即关闭）" -f $label,$emuName,$(if($hp){$hp}else{'未指定'})) -ForegroundColor Cyan
+    } elseif($devSerial){
+      $online = $false
+      $tryDeadline = (Get-Date).AddSeconds(15)
+      while((Get-Date) -lt $tryDeadline){
+        $cur = @(Get-HdcTargets)
+        if($cur -contains $devSerial){ $online = $true; break }
+        Start-Sleep -Seconds 2
+      }
+      if($online){
+        $devices += [pscustomobject]@{ Label=$label; ClassFilter=$cf; Emulator=''; HdcPort=0; DeviceSerial=$devSerial; IsEmulator=$false }
+        Write-Host ("  设备 {0}：已在线（{1}），直接复用" -f $label,$devSerial) -ForegroundColor Green
+      } else {
+        $cur = @(Get-HdcTargets)
+        Write-Host ("  设备 {0} 的 device '{1}' 不在线，跳过。当前 hdc list targets: {2}" -f $label,$devSerial,$(if($cur.Count){$cur -join ', '}else{'[Empty]'})) -ForegroundColor Yellow
+      }
     } else { Die "设备 $label 缺少 emulator/device 配置，无法确定目标设备。" }
   }
+  if($devices.Count -eq 0){ Die "计划文件中没有任何可用设备（真机不在线且无模拟器，或配置缺失）。" }
   $planMode = "multi ($([IO.Path]::GetFileName($planFile)))，串行（一次只跑一个模拟器，跑完即关）"
 } else {
   # single-device mode: interactive device selection

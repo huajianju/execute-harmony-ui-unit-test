@@ -301,23 +301,36 @@ wait_boot_finished(){
 
 # Wake screen + disable auto-suspend + swipe-up to unlock. MUST be called AFTER boot finished.
 unlock_screen(){
-  local serial="$1"
+  local serial="$1" r1 r3 i
   echo "  主动唤醒并解锁屏幕..." >&2
-  hdc -t "$serial" shell power-shell wakeup >/dev/null 2>&1 || true
+  r1="$(hdc -t "$serial" shell power-shell wakeup 2>&1)"
   hdc -t "$serial" shell power-shell timeout -o 600000 >/dev/null 2>&1 || true
-  sleep 2
-  hdc -t "$serial" shell uinput -T -m 540 2000 540 400 500 >/dev/null 2>&1 || true
-  sleep 2
+  sleep 3
+  r3=""
+  for i in 1 2; do
+    r3="$(hdc -t "$serial" shell uinput -T -m 540 2000 540 400 500 2>&1)"
+    sleep 2
+  done
+  echo "    power-shell wakeup : ${r1:-(无输出/ok)}" >&2
+  echo "    uinput swipe x2   : ${r3:-(无输出/ok)}" >&2
 }
 
 # Ensure fully booted, then wake & unlock. Called before install on every device.
 wait_device_ready(){
   local serial="$1" bt="${2:-20}"
   echo "  确认系统完全启动（bootTimeout=${bt}s）..." >&2
-  if wait_boot_finished "$serial" "$bt"; then ok "    系统已完全启动"; else
-    warn "    未检测到启动完成标志，额外等待 15s 后唤醒..."
+  if wait_boot_finished "$serial" "$bt"; then ok "    bootevent=true"; else
+    warn "    未检测到 bootevent，额外等待 15s..."
     sleep 15
   fi
+  # 兜底：用 bm dump 能响应来确认系统服务就绪
+  local bm_deadline=$(( $(date +%s) + 90 )) bm_ready=0 r
+  while [ $(date +%s) -lt $bm_deadline ]; do
+    r="$(hdc -t "$serial" shell bm dump -a 2>/dev/null)"
+    if [ -n "$r" ]; then bm_ready=1; break; fi
+    sleep 5
+  done
+  if [ "$bm_ready" = 1 ]; then ok "    系统服务就绪（bm dump 可用）"; else warn "    系统服务仍未就绪，继续尝试唤醒..."; fi
   unlock_screen "$serial"
 }
 
@@ -335,9 +348,15 @@ resolve_emulator_serial(){
   else
     ok "模拟器 '$name' 已在运行，等待 hdc 识别..." >&2
   fi
-  get_targets
+  # capture BEFORE launching: retry to ensure already-connected devices (e.g. real phone) are included,
+  # so the diff fallback won't mistakenly pick them up as the "new" emulator.
+  local _bdeadline=$(( $(date +%s) + 10 ))
   local before=()
-  if [ ${#TARGETS[@]} -gt 0 ]; then before=("${TARGETS[@]}"); fi
+  while [ $(date +%s) -lt $_bdeadline ]; do
+    get_targets
+    if [ ${#TARGETS[@]} -gt 0 ]; then before=("${TARGETS[@]}"); break; fi
+    sleep 2
+  done
   if [ "$wasrunning" = 0 ]; then
     if [ "$hdcport" -gt 0 ] 2>/dev/null; then
       nohup "$emuexe" -start "$name" -hdcport "$hdcport" >/dev/null 2>&1 &
@@ -380,7 +399,7 @@ resolve_emulator_serial(){
       fi
     fi
     # 3) fallback: newly-online diff, verified
-    if [ -z "$cand" ] && [ "$wasrunning" = 0 ] && [ ${#TARGETS[@]} -gt 0 ]; then
+    if [ -z "$cand" ] && [ "$wasrunning" = 0 ] && [ ${#TARGETS[@]} -gt 0 ] && { [ -z "$hdcport" ] || [ "$hdcport" = "0" ]; }; then
       for t in "${TARGETS[@]}"; do
         [ -n "$t" ] || continue
         skip=0
@@ -410,6 +429,19 @@ stop_emulator(){
   [ -n "$serial" ] && hdc tdisconn "$serial" >/dev/null 2>&1 || true
   "$emuexe" -stop "$name" >/dev/null 2>&1 || true
 }
+
+# put CWD (project root, contains hvigorw) first in PATH so `hvigorw` resolves
+case ":$PATH:" in *":$PWD:"*) ;; *) PATH="$PWD:$PATH";; esac
+export PATH
+# auto-add DevEco tool dirs to PATH (hdc/hvigorw/ohpm) derived from DEVECO_SDK_HOME
+if [ -n "${DEVECO_SDK_HOME:-}" ]; then
+  DEVROOT="$(cd "$DEVECO_SDK_HOME/.." 2>/dev/null && pwd)"
+  for d in "$DEVECO_SDK_HOME/default/openharmony/toolchains" "$DEVROOT/tools/hvigor/bin" "$DEVROOT/tools/ohpm/bin"; do
+    [ -d "$d" ] || continue
+    case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d";; esac
+  done
+  export PATH
+fi
 
 # ---------------- 0. env check ----------------
 step "Environment check"
@@ -524,26 +556,31 @@ if [ -n "$PLAN_FILE" ]; then
     _name=""; _dev=""; _emu=""; _cf=""; _hp=""
     IFS=$'\t' read -r _name _dev _emu _cf _hp <<<"$line"
     [ -z "$_name" ] && _name="device$idx"
-    if [ -n "$_dev" ]; then
-      get_targets
-      found=0
-      if [ ${#TARGETS[@]} -gt 0 ]; then for t in "${TARGETS[@]}"; do [ "$t" = "$_dev" ] && found=1 && break; done; fi
-      if [ "$found" = 1 ]; then
-        DEV_SERIAL+=("$_dev"); DEV_LABEL+=("$_name"); DEV_FILTER+=("$_cf"); DEV_EMULATOR+=(""); DEV_HDCPORT+=("0"); DEV_ISEMULATOR+=("0")
-        ok "设备 $_name：已在线（$_dev），直接复用"
-      else
-        die "设备 $_name 的 device '$_dev' 不在线（真机/已启动设备需已连接；模拟器请改用 emulator + hdcport 配置）。"
-      fi
-    elif [ -n "$_emu" ]; then
+    if [ -n "$_emu" ]; then
       [ -n "$EMU_EXE" ] || die "设备 $_name 配置了 emulator 但缺少 Emulator（请设置 emulatorPath 或 DEVECO_SDK_HOME）。"
       hp="0"; if [ -n "$_hp" ] && [[ "$_hp" =~ ^[0-9]+$ ]]; then hp="$_hp"; fi
       DEV_SERIAL+=(""); DEV_LABEL+=("$_name"); DEV_FILTER+=("$_cf"); DEV_EMULATOR+=("$_emu"); DEV_HDCPORT+=("$hp"); DEV_ISEMULATOR+=("1")
       echo "  设备 $_name：模拟器 '$_emu'（hdcport=${hp}，将在执行时启动、跑完即关闭）"
+    elif [ -n "$_dev" ]; then
+      _retry_end=$(( $(date +%s) + 15 ))
+      found=0
+      while [ $(date +%s) -lt $_retry_end ] && [ "$found" = 0 ]; do
+        get_targets
+        if [ ${#TARGETS[@]} -gt 0 ]; then for t in "${TARGETS[@]}"; do [ "$t" = "$_dev" ] && found=1 && break; done; fi
+        [ "$found" = 0 ] && sleep 2
+      done
+      if [ "$found" = 1 ]; then
+        DEV_SERIAL+=("$_dev"); DEV_LABEL+=("$_name"); DEV_FILTER+=("$_cf"); DEV_EMULATOR+=(""); DEV_HDCPORT+=("0"); DEV_ISEMULATOR+=("0")
+        ok "设备 $_name：已在线（$_dev），直接复用"
+      else
+        get_targets
+        warn "设备 $_name 的 device '$_dev' 不在线，跳过。当前 hdc list targets: ${TARGETS[*]:-[Empty]}"
+      fi
     else
       die "设备 $_name 缺少 emulator/device 配置，无法确定目标设备。"
     fi
   done
-  [ ${#DEV_SERIAL[@]} -gt 0 ] || die "Test plan has no devices: $PLAN_FILE"
+  [ ${#DEV_SERIAL[@]} -gt 0 ] || die "计划文件中没有任何可用设备（真机不在线且无模拟器，或配置缺失）。"
   PLAN_MODE="multi ($(basename "$PLAN_FILE"))，串行（一次只跑一个模拟器，跑完即关）"
 else
   # single-device mode: interactive device selection
