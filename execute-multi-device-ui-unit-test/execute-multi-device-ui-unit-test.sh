@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # execute-multi-device-ui-unit-test.sh — Generic HarmonyOS build + install + UT + report + cleanup (macOS / Linux)
 # Bash 3.2+ compatible. Mirrors execute-multi-device-ui-unit-test.ps1. Supports multi-device test plan.
 #
@@ -246,13 +246,14 @@ get_targets(){
 }
 uninstall_from_device(){ hdc -t "$1" shell bm uninstall -n "$2" 2>/dev/null; }
 install_hap(){
-  local dev="$1" hap="$2" label="$3" hd=(-t "$dev")
+  local dev="$1" hap="$2" label="$3" hd=(-t "$dev") out rc
   local tmp="data/local/tmp/hap_$RANDOM"
   hdc "${hd[@]}" shell mkdir "$tmp" 2>/dev/null
   hdc "${hd[@]}" file send "$hap" "$tmp" 2>/dev/null
-  hdc "${hd[@]}" shell bm install -p "$tmp"
-  local rc=$?
+  out="$(hdc "${hd[@]}" shell bm install -p "$tmp" 2>&1)"
+  rc=$?
   hdc "${hd[@]}" shell rm -rf "$tmp" 2>/dev/null
+  echo "    bm install output: $out" >&2
   if [ $rc -ne 0 ]; then warn "[$label] install FAILED (rc=$rc)"; return 1; fi
   return 0
 }
@@ -399,7 +400,7 @@ resolve_emulator_serial(){
       fi
     fi
     # 3) fallback: newly-online diff, verified
-    if [ -z "$cand" ] && [ "$wasrunning" = 0 ] && [ ${#TARGETS[@]} -gt 0 ] && { [ -z "$hdcport" ] || [ "$hdcport" = "0" ]; }; then
+    if [ -z "$cand" ] && [ "$wasrunning" = 0 ] && [ ${#TARGETS[@]} -gt 0 ]; then
       for t in "${TARGETS[@]}"; do
         [ -n "$t" ] || continue
         skip=0
@@ -734,7 +735,8 @@ while [ $i -lt $n ]; do
     else
       if [ -n "$cf" ]; then fdesc="$cf"; else fdesc="(全量)"; fi
       echo "  run aa test (class filter: $fdesc, timeout=${TEST_TIMEOUT}ms)..."
-      run_aa_test "$serial" "$BUNDLE_NAME" "$SUIT_NAME" "$cf" "$TEST_TIMEOUT" > "$TMPD/dev_${i}.txt"
+      unlock_screen "$serial"   # re-unlock right before aa test (screen may re-lock during install)
+    run_aa_test "$serial" "$BUNDLE_NAME" "$SUIT_NAME" "$cf" "$TEST_TIMEOUT" > "$TMPD/dev_${i}.txt"
       summary="$(grep 'Tests run:' "$TMPD/dev_${i}.txt" | tail -1)"
       repcode="$(grep 'OHOS_REPORT_CODE:' "$TMPD/dev_${i}.txt" | tail -1 | sed -E 's/.*OHOS_REPORT_CODE:[[:space:]]*//')"
       if [ -n "$summary" ]; then

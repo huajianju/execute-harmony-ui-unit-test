@@ -61,7 +61,7 @@ function Get-HdcTargets {
   $o = & hdc list targets 2>$null
   $list = @()
   foreach($x in ($o -split "`r?`n")){ $t=$x.Trim(); if($t -and $t -ne '[Empty]'){ $list += $t } }
-  return ,[string[]]$list
+  return [string[]]$list
 }
 
 # Verify a hdc serial is truly online & responsive (guards against transient/blank/invalid serials)
@@ -142,9 +142,10 @@ function Install-HapToDevice {
   $tmp = "data/local/tmp/hap_$(Get-Random)"
   & hdc @hd shell mkdir $tmp 2>$null
   & hdc @hd file send $HapPath $tmp 2>$null
-  & hdc @hd shell bm install -p $tmp
+  $instOut = (& hdc @hd shell bm install -p $tmp 2>&1 | Out-String).Trim()
   $rc = $LASTEXITCODE
   & hdc @hd shell rm -rf $tmp 2>$null
+  Write-Host ("    bm install output: {0}" -f $instOut) -ForegroundColor DarkGray
   if($rc -ne 0){ Write-Host ("  [{0}] install FAILED (rc={1})" -f $Label,$rc) -ForegroundColor Red; return $false }
   return $true
 }
@@ -278,10 +279,9 @@ function Resolve-EmulatorSerial {
         elseif(Test-HdcSerial $tconn2){ $cand = $tconn2 }
       }
     }
-    # 3) fallback: newly-online diff — ONLY when no hdcport configured.
-    #    With hdcport set, diff is disabled because it may wrongly pick an already-connected real device
-    #    (only 127.0.0.1:<hdcport> is accepted as the emulator in that case).
-    if(-not $cand -and -not $wasRunning -and $HdcPort -eq 0){
+    # 3) fallback: newly-online diff (verified). Reliable now that Get-HdcTargets returns a flat array
+    #    (before correctly includes already-connected real devices, so diff only picks the new emulator).
+    if(-not $cand -and -not $wasRunning){
       $new = @($targets | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and ($before -notcontains $_) })
       foreach($cc in $new){ if(Test-HdcSerial $cc){ $cand = $cc; break } }
     }
@@ -559,6 +559,7 @@ foreach($d in $devices){
       }
       $filterDesc = if($d.ClassFilter){ $d.ClassFilter } else { '(全量)' }
       Write-Host ("  run aa test (class filter: {0}, timeout={1}ms)..." -f $filterDesc,$TestTimeout)
+      Unlock-Screen -Serial $serial   # re-unlock right before aa test (screen may re-lock during install)
       $out = Invoke-AaTest -Dev $serial -Bundle $BundleName -Suite $SuitName -ClassFilter $d.ClassFilter -Timeout $TestTimeout
       $res = Get-TestResult -TestOut $out
       $r.Result = $res
