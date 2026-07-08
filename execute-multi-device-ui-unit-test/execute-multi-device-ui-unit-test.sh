@@ -236,7 +236,7 @@ jread(){ node "$TOOL" read "$1" "$2"; }
 get_targets(){
   TARGETS=()
   local line
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     [ -z "$line" ] && continue
@@ -460,7 +460,7 @@ APP_JSON="$ROOT/AppScope/app.json5"
 [ -z "$PRODUCT" ]     && PRODUCT="$(jread "$BP_JSON" '.app.products[0].name')"
 [ -z "$BUNDLE_NAME" ] && BUNDLE_NAME="$(jread "$APP_JSON" '.app.bundleName')"
 ENTRY_SRC=""; MODULE_NAME=""; ABILITY_NAME=""
-while IFS= read -r src || [-n "$src"]; do
+while IFS= read -r src || [ -n "$src" ]; do
   [ -z "$src" ] && continue
   rel="${src#./}"
   mj="$ROOT/$rel/src/main/module.json5"
@@ -496,14 +496,14 @@ hvigorw --no-daemon -p "product=$PRODUCT" -p "buildMode=$BUILD_MODE" assembleHap
 # ---------------- 5. locate app HAP ----------------
 step "Locate HAP artifact"
 HAP=""
-while IFS= read -r -d '' f; do
+while IFS= read -r -d '' f || [ -n "$f" ]; do
   parent="$(basename "$(dirname "$f")")"
   case "$parent" in *[Tt]est*) continue;; esac
   case "$(basename "$f")" in *-signed.hap) HAP="$f"; break;; esac
 done < <(find "$BUILD_DIR" -name '*.hap' -print0 2>/dev/null)
 if [ -z "$HAP" ]; then
   newest=""
-  while IFS= read -r -d '' f; do
+  while IFS= read -r -d '' f || [ -n "$f" ]; do
     parent="$(basename "$(dirname "$f")")"
     case "$parent" in *[Tt]est*) continue;; esac
     if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then newest="$f"; fi
@@ -529,7 +529,7 @@ if [ -n "$PLAN_FILE" ]; then
   [ -f "$PLAN_FILE" ] || die "Test plan not found: $PLAN_FILE"
   echo "  计划文件：$PLAN_FILE"
   PLAN_LINES=()
-  while IFS= read -r line; do PLAN_LINES+=("$line"); done < <(node "$TOOL" plan "$PLAN_FILE")
+  while IFS= read -r line || [ -n "$line" ]; do PLAN_LINES+=("$line"); done < <(node "$TOOL" plan "$PLAN_FILE")
   line0="${PLAN_LINES[0]:-}"
   if [ "${line0:0:7}" = "EMUPATH" ]; then EMU_EXE="${line0:8}"; fi
   line1="${PLAN_LINES[1]:-}"
@@ -671,7 +671,7 @@ if [ "$NO_TEST" -eq 0 ]; then
 
   step "Locate test HAP"
   newest_t=""
-  while IFS= read -r -d '' f; do
+  while IFS= read -r -d '' f || [ -n "$f" ]; do
     parent="$(basename "$(dirname "$f")")"
     if [ "$parent" = "$TEST_TARGET" ]; then if [ -z "$newest_t" ] || [ "$f" -nt "$newest_t" ]; then newest_t="$f"; fi; fi
   done < <(find "$BUILD_DIR" -name '*.hap' -print0 2>/dev/null)
@@ -776,15 +776,15 @@ if [ "$KEEP_ARTIFACTS" -eq 0 ]; then
     i=$((i+1))
   done
   nbuild=0; nohm=0; nlock=0
-  while IFS= read -r -d '' d; do
+  while IFS= read -r -d '' d || [ -n "$d" ]; do
     case "$d" in *oh_modules*) continue;; esac
     rm -rf "$d" && nbuild=$((nbuild+1))
   done < <(find "$ROOT" -type d -name build -print0 2>/dev/null)
-  while IFS= read -r -d '' d; do
+  while IFS= read -r -d '' d || [ -n "$d" ]; do
     case "$(dirname "$d")" in *oh_modules*) continue;; esac
     rm -rf "$d" && nohm=$((nohm+1))
   done < <(find "$ROOT" -type d -name oh_modules -print0 2>/dev/null)
-  while IFS= read -r -d '' f; do
+  while IFS= read -r -d '' f || [ -n "$f" ]; do
     case "$f" in *oh_modules*) continue;; esac
     rm -f "$f" && nlock=$((nlock+1))
   done < <(find "$ROOT" -type f -name oh-package-lock.json5 -print0 2>/dev/null)
