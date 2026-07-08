@@ -460,7 +460,7 @@ APP_JSON="$ROOT/AppScope/app.json5"
 [ -z "$PRODUCT" ]     && PRODUCT="$(jread "$BP_JSON" '.app.products[0].name')"
 [ -z "$BUNDLE_NAME" ] && BUNDLE_NAME="$(jread "$APP_JSON" '.app.bundleName')"
 ENTRY_SRC=""; MODULE_NAME=""; ABILITY_NAME=""
-while IFS= read -r src; do
+while IFS= read -r src || [-n "$src"]; do
   [ -z "$src" ] && continue
   rel="${src#./}"
   mj="$ROOT/$rel/src/main/module.json5"
